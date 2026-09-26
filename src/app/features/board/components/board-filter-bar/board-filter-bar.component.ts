@@ -5,33 +5,33 @@ import {
   computed,
   input,
   output,
+  signal,
   viewChild,
 } from '@angular/core';
 
 import { BoardFilterState, countActiveFilters } from '../../../../core/models/filter.model';
 import {
-  ISSUE_PRIORITIES,
   IssuePriority,
   IssueType,
-  ISSUE_TYPES,
 } from '../../../../core/models/issue.model';
 import { Sprint } from '../../../../core/models/sprint.model';
 import { User } from '../../../../core/models/user.model';
-import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
 import { ButtonComponent } from '../../../../shared/ui/button/button.component';
+import { ModalShellComponent } from '../../../../shared/ui/modal/modal-shell.component';
+import { BoardFilterControlsComponent } from '../board-filter-controls/board-filter-controls.component';
 
 /**
- * The board's filter surface: free-text search, assignee, priority, type and
- * sprint selectors plus the density toggle.
+ * The board's filter surface: free-text search plus a set of filter controls.
  *
- * The component never mutates the filter object it receives. Every change is
- * emitted as a complete, new {@link BoardFilterState} so the owning store
- * stays the single source of truth.
+ * From the large breakpoint up the controls sit inline beside the search
+ * field. Below it they collapse behind a single trigger that carries a count
+ * of the active filters, opening a bottom sheet — roughly twenty chips are far
+ * too many to leave on screen at phone widths.
  */
 @Component({
   selector: 'app-board-filter-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AvatarComponent, ButtonComponent],
+  imports: [BoardFilterControlsComponent, ButtonComponent, ModalShellComponent],
   template: `
     <div
       class="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900 p-3
@@ -52,94 +52,69 @@ import { ButtonComponent } from '../../../../shared/ui/button/button.component';
         />
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Assignee</span>
-        @for (user of assignableUsers(); track user.id) {
-          <button
-            type="button"
-            [class]="assigneeClasses(user.id)"
-            [attr.aria-pressed]="filter().assigneeIds.includes(user.id)"
-            [attr.aria-label]="'Filter by ' + user.name"
-            (click)="toggleAssignee.emit(user.id)"
-          >
-            <app-avatar [user]="user" size="xs" [decorative]="true" />
-            <span class="truncate">{{ firstName(user) }}</span>
-          </button>
-        }
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Priority</span>
-        @for (priority of ISSUE_PRIORITIES; track priority) {
-          <button
-            type="button"
-            [class]="chipClasses(filter().priorities.includes(priority))"
-            [attr.aria-pressed]="filter().priorities.includes(priority)"
-            (click)="togglePriority.emit(priority)"
-          >
-            {{ priority }}
-          </button>
-        }
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Type</span>
-        @for (type of ISSUE_TYPES; track type) {
-          <button
-            type="button"
-            [class]="chipClasses(filter().types.includes(type))"
-            [attr.aria-pressed]="filter().types.includes(type)"
-            (click)="toggleType.emit(type)"
-          >
-            {{ type }}
-          </button>
-        }
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <label for="sprint-filter" class="text-xs font-medium uppercase tracking-wide text-slate-400">
-          Sprint
-        </label>
-        <select
-          id="sprint-filter"
-          [value]="filter().sprintId ?? ''"
-          class="min-h-11 rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm
-            text-slate-100 focus:outline-2 focus:outline-offset-2 focus:outline-indigo-500"
-          (change)="handleSprintChange($event)"
+      <button
+        type="button"
+        class="flex min-h-11 items-center justify-center gap-2 rounded-lg border
+          border-slate-700 bg-slate-800 px-3 text-sm font-medium text-slate-100
+          hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2
+          focus-visible:outline-indigo-500 lg:hidden"
+        [attr.aria-expanded]="sheetOpen()"
+        aria-haspopup="dialog"
+        (click)="openSheet()"
+      >
+        <svg
+          class="h-4 w-4 shrink-0"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          aria-hidden="true"
         >
-          <option value="">All sprints</option>
-          @for (sprint of sprints(); track sprint.id) {
-            <option [value]="sprint.id">{{ sprint.name }}</option>
-          }
-        </select>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <app-button
-          label="Compact"
-          size="sm"
-          variant="secondary"
-          [pressed]="filter().density === 'compact'"
-          (pressedChange)="densityChanged.emit('compact')"
-        />
-        <app-button
-          label="Comfortable"
-          size="sm"
-          variant="secondary"
-          [pressed]="filter().density === 'comfortable'"
-          (pressedChange)="densityChanged.emit('comfortable')"
-        />
-
+          <path d="M2 4h12M4.5 8h7M6.5 12h3" />
+        </svg>
+        Filters
         @if (activeCount() > 0) {
-          <app-button
-            [label]="'Clear ' + activeCount() + ' filters'"
-            size="sm"
-            variant="secondary"
-            (click)="clearRequested.emit()"
-          />
+          <span
+            class="inline-flex h-5 min-w-5 items-center justify-center rounded-full
+              bg-indigo-500 px-1.5 text-xs font-semibold text-white"
+          >
+            {{ activeCount() }}
+          </span>
         }
-      </div>
+      </button>
+
+      <app-board-filter-controls
+        class="hidden lg:flex lg:flex-wrap lg:items-center lg:gap-2"
+        [filter]="filter()"
+        [users]="users()"
+        [sprints]="sprints()"
+        (toggleAssignee)="toggleAssignee.emit($event)"
+        (togglePriority)="togglePriority.emit($event)"
+        (toggleType)="toggleType.emit($event)"
+        (sprintChanged)="sprintChanged.emit($event)"
+        (densityChanged)="densityChanged.emit($event)"
+        (clearRequested)="clearRequested.emit()"
+      />
     </div>
+
+    @if (sheetOpen()) {
+      <app-modal-shell title="Filters" variant="sheet" (closed)="closeSheet()">
+        <div class="flex flex-col gap-4">
+          <app-board-filter-controls
+            [filter]="filter()"
+            [users]="users()"
+            [sprints]="sprints()"
+            (toggleAssignee)="toggleAssignee.emit($event)"
+            (togglePriority)="togglePriority.emit($event)"
+            (toggleType)="toggleType.emit($event)"
+            (sprintChanged)="sprintChanged.emit($event)"
+            (densityChanged)="densityChanged.emit($event)"
+            (clearRequested)="clearRequested.emit()"
+          />
+        </div>
+      </app-modal-shell>
+    }
   `,
 })
 export class BoardFilterBarComponent {
@@ -162,40 +137,17 @@ export class BoardFilterBarComponent {
     this.searchField()?.nativeElement.focus();
   }
 
-  protected readonly ISSUE_PRIORITIES = ISSUE_PRIORITIES;
-  protected readonly ISSUE_TYPES = ISSUE_TYPES;
-
   protected readonly activeCount = computed(() => countActiveFilters(this.filter()));
 
-  /** Viewers cannot own work, so they are not offered as a filter option. */
-  protected readonly assignableUsers = computed(() =>
-    this.users().filter((user) => user.role !== 'viewer'),
-  );
+  /** True while the mobile filter sheet is open; the inline bar is desktop-only. */
+  protected readonly sheetOpen = signal(false);
 
-  /** First name only; the avatar already identifies the person. */
-  protected firstName(user: User): string {
-    return user.name.split(/\s+/)[0] ?? user.name;
+  protected openSheet(): void {
+    this.sheetOpen.set(true);
   }
 
-  protected chipClasses(isActive: boolean): string {
-    const base =
-      'min-h-11 rounded-lg border px-3 text-sm font-medium capitalize transition-colors ' +
-      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500';
-
-    return isActive
-      ? `${base} border-indigo-500 bg-indigo-600 text-white`
-      : `${base} border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700`;
-  }
-
-  protected assigneeClasses(userId: string): string {
-    const base =
-      'flex min-h-11 items-center gap-2 rounded-lg border px-2 text-sm font-medium ' +
-      'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ' +
-      'focus-visible:outline-indigo-500';
-
-    return this.filter().assigneeIds.includes(userId)
-      ? `${base} border-indigo-500 bg-indigo-600 text-white`
-      : `${base} border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700`;
+  protected closeSheet(): void {
+    this.sheetOpen.set(false);
   }
 
   protected handleSearch(event: Event): void {
@@ -203,14 +155,6 @@ export class BoardFilterBarComponent {
 
     if (target instanceof HTMLInputElement) {
       this.searchChanged.emit(target.value);
-    }
-  }
-
-  protected handleSprintChange(event: Event): void {
-    const target = event.target;
-
-    if (target instanceof HTMLSelectElement) {
-      this.sprintChanged.emit(target.value.length === 0 ? null : target.value);
     }
   }
 }
