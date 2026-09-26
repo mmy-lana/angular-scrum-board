@@ -16,7 +16,6 @@ import {
 } from '../../../../core/models/issue.model';
 import { Sprint } from '../../../../core/models/sprint.model';
 import { User } from '../../../../core/models/user.model';
-import { ButtonComponent } from '../../../../shared/ui/button/button.component';
 import { ModalShellComponent } from '../../../../shared/ui/modal/modal-shell.component';
 import { BoardFilterControlsComponent } from '../board-filter-controls/board-filter-controls.component';
 
@@ -31,7 +30,7 @@ import { BoardFilterControlsComponent } from '../board-filter-controls/board-fil
 @Component({
   selector: 'app-board-filter-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BoardFilterControlsComponent, ButtonComponent, ModalShellComponent],
+  imports: [BoardFilterControlsComponent, ModalShellComponent],
   template: `
     <div
       class="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900 p-3
