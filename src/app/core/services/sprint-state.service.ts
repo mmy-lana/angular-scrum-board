@@ -150,7 +150,13 @@ export class SprintStateService {
 
     try {
       await db.transaction('rw', db.sprints, async () => {
-        for (const sprint of this.board.sprints()) {
+        // Read through the transaction rather than the `sprints` signal. The
+        // signal is a snapshot from before the transaction opened, so a sprint
+        // that a concurrent write has just promoted would be missed here and
+        // two sprints would end up active.
+        const storedSprints = await db.sprints.toArray();
+
+        for (const sprint of storedSprints) {
           if (sprint.id === sprintId) {
             continue;
           }

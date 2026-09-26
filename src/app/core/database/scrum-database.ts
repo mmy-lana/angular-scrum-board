@@ -48,6 +48,20 @@ export class ScrumDatabase extends Dexie {
       activities: 'id, issueId, actorId, timestamp',
       columns: 'id, projectId, sortOrder',
     });
+
+    /**
+     * Indexes `issues.reporterId` so a departing teammate's reports can be
+     * found without scanning the table.
+     *
+     * Removing a user has to re-point the issues they reported, and querying
+     * an unindexed key path throws `SchemaError` rather than falling back to a
+     * scan. IndexedDB backfills a newly created index over the records already
+     * in the store, so the upgrade needs no data migration and commits as one
+     * transaction.
+     */
+    this.version(2).stores({
+      issues: 'id, projectId, key, statusId, sprintId, assigneeId, reporterId, sortOrder, version, createdAt',
+    });
   }
 
   /**

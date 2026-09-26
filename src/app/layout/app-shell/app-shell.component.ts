@@ -42,33 +42,38 @@ const NAV_ITEMS: readonly NavItem[] = [
     '(document:keydown.escape)': 'closeDrawer()',
   },
   template: `
-    <div class="flex min-h-screen bg-slate-950">
+    <div class="flex h-screen w-screen overflow-hidden bg-slate-950">
       <!-- Sidebar from lg up. -->
       <aside
-        class="hidden w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900 lg:flex"
+        class="hidden w-64 shrink-0 flex-col justify-between border-r border-slate-800 bg-slate-900 lg:flex"
       >
         <div class="border-b border-slate-800 p-4">
           <p class="truncate text-sm font-semibold text-slate-100">{{ title }}</p>
           <p class="truncate text-xs text-slate-400">{{ projectKey() }}</p>
         </div>
 
-        <nav aria-label="Primary" class="flex flex-1 flex-col gap-1 p-2">
-          @for (item of navItems; track item.path) {
-            <a
-              [routerLink]="item.path"
-              routerLinkActive="bg-indigo-600 text-white"
-              [routerLinkActiveOptions]="{ exact: false }"
-              class="flex min-h-11 flex-col justify-center rounded-lg px-3 text-sm
-                font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-100
-                focus-visible:outline-2 focus-visible:outline-offset-2
-                focus-visible:outline-indigo-500"
-            >
-              <span>{{ item.label }}</span>
-              <span class="text-xs font-normal text-slate-400">{{ item.description }}</span>
-            </a>
-          }
+        <nav
+          aria-label="Primary"
+          class="flex min-h-0 flex-1 flex-col justify-between overflow-hidden p-2"
+        >
+          <div class="flex flex-col gap-1 overflow-y-auto">
+            @for (item of navItems; track item.path) {
+              <a
+                [routerLink]="item.path"
+                routerLinkActive="bg-indigo-600 text-white"
+                [routerLinkActiveOptions]="{ exact: false }"
+                class="flex min-h-11 flex-col justify-center rounded-lg px-3 text-sm
+                  font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-100
+                  focus-visible:outline-2 focus-visible:outline-offset-2
+                  focus-visible:outline-indigo-500"
+              >
+                <span>{{ item.label }}</span>
+                <span class="text-xs font-normal text-slate-400">{{ item.description }}</span>
+              </a>
+            }
+          </div>
 
-          <div class="mt-auto flex flex-col gap-1 border-t border-slate-800 p-2 pt-3">
+          <div class="flex shrink-0 flex-col gap-1 border-t border-slate-800 p-2 pt-3">
             <button
               type="button"
               class="flex min-h-11 items-center gap-2 rounded-lg px-3 text-left text-sm
@@ -126,10 +131,10 @@ const NAV_ITEMS: readonly NavItem[] = [
         </nav>
       </aside>
 
-      <!-- Mobile top bar. -->
-      <div class="flex min-w-0 flex-1 flex-col">
+      <!-- Mobile top bar and the scrolling viewport for the routed view. -->
+      <div class="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
         <header
-          class="flex items-center gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2
+          class="flex shrink-0 items-center gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2
             lg:hidden"
         >
           <button
@@ -150,7 +155,12 @@ const NAV_ITEMS: readonly NavItem[] = [
           </p>
         </header>
 
-        <main class="min-w-0 flex-1 p-3 sm:p-4 lg:p-6">
+        <!--
+          The routed view owns its own scrolling. This element is a fixed-height
+          flex child with min-h-0, which is what lets a grandchild use
+          overflow-y-auto instead of stretching the document.
+        -->
+        <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4 lg:p-6">
           <router-outlet />
         </main>
       </div>

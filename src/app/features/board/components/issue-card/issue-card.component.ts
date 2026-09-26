@@ -1,5 +1,5 @@
 import { CdkDragHandle } from '@angular/cdk/drag-drop';
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { Issue } from '../../../../core/models/issue.model';
 import { ViewDensity } from '../../../../core/models/filter.model';
@@ -15,17 +15,33 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
  * compact layout keeps roughly four cards visible per screen by collapsing to
  * a single truncated line, while comfortable density is used from 768px up.
  *
- * The card is a plain container, not a button. Its interactive children (the
- * title, the move control and the drag handle) are real buttons, which avoids
- * nesting interactive elements inside an element with `role="button"` and
- * gives every action a reachable tab stop.
+ * The whole card is the hit target, because a title-sized button is a poor
+ * target on touch and a card is expected to open where it is tapped. That
+ * rules out marking the card itself as a button, which would nest the move
+ * control inside a button role. Instead the card is a focusable article that
+ * responds to Enter and Space, and the two gestures that mean something other
+ * than "open this" — dragging and the move sheet — stop their clicks from
+ * reaching it.
  */
 @Component({
   selector: 'app-issue-card',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [AvatarComponent, PriorityIconComponent, TypeIconComponent, CdkDragHandle],
+  host: {
+    // A drop is followed by a click on whatever was under the pointer, which
+    // would otherwise open the card the user just moved somewhere else.
+    '(cdkDragStarted)': 'setDragging(true)',
+    '(cdkDragEnded)': 'setDragging(false)',
+  },
   template: `
-    <article [class]="containerClasses()">
+    <article
+      tabindex="0"
+      [class]="containerClasses()"
+      [attr.aria-label]="accessibleLabel()"
+      (click)="open()"
+      (keydown.enter)="open()"
+      (keydown.space)="openFromSpace($event)"
+    >
       <div class="flex items-start gap-2">
         <div class="flex min-w-0 flex-1 items-center gap-1.5">
           <span class="font-mono text-xs text-slate-400">{{ issue().key }}</span>
@@ -41,7 +57,7 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
                 hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-2
                 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
               [attr.aria-label]="'Move ' + issue().key + ' without dragging'"
-              (click)="requestMove()"
+              (click)="requestMove($event)"
             >
               <svg
                 class="h-4 w-4"
@@ -61,6 +77,7 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
 
           <span
             cdkDragHandle
+            (click)="$event.stopPropagation()"
             class="flex min-h-11 min-w-11 cursor-grab touch-none items-center justify-center
               rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-100 active:cursor-grabbing
               focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
@@ -78,14 +95,9 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
         </div>
       </div>
 
-      <button
-        type="button"
-        [class]="titleClasses()"
-        [attr.aria-label]="accessibleLabel()"
-        (click)="open()"
-      >
+      <p [class]="titleClasses()">
         {{ issue().title }}
-      </button>
+      </p>
 
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
@@ -124,10 +136,18 @@ export class IssueCardComponent {
 
   protected readonly isCompact = computed(() => this.density() === 'compact');
 
+  /**
+   * Suppresses the click that follows a drag. The flag is only ever read
+   * inside {@link open}, so a missed reset costs one un-openable card rather
+   * than a stuck drag.
+   */
+  private readonly dragging = signal(false);
+
   protected readonly containerClasses = computed<string>(() => {
     const base =
-      'flex w-full flex-col rounded-lg border border-slate-700 bg-slate-800 ' +
+      'flex w-full cursor-pointer flex-col rounded-lg border border-slate-700 bg-slate-800 ' +
       'text-left shadow-sm transition-colors hover:border-slate-600 ' +
+      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ' +
       'focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-indigo-500';
 
     return `${base} ${this.isCompact() ? 'gap-1.5 p-3' : 'gap-2 p-3'}`;
@@ -139,9 +159,7 @@ export class IssueCardComponent {
    * card grow arbitrarily tall.
    */
   protected readonly titleClasses = computed<string>(() => {
-    const base =
-      'w-full text-left text-sm font-medium text-slate-100 hover:text-white ' +
-      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500';
+    const base = 'w-full text-left text-sm font-medium text-slate-100 hover:text-white';
 
     return this.isCompact() ? `${base} truncate` : `${base} line-clamp-2`;
   });
@@ -156,13 +174,31 @@ export class IssueCardComponent {
     return `${issue.key}: ${issue.title}${points}`;
   });
 
-  /** Opens the detail view. Bound to the title, the card's primary action. */
+  /** Opens the detail view. The card surface, the title and Enter all land here. */
   protected open(): void {
+    if (this.dragging()) {
+      return;
+    }
+
     this.opened.emit(this.issue().id);
   }
 
+  /**
+   * Space is the other activation key, but it also scrolls. On a card that is
+   * a reasonable way to move the page, so the default is suppressed.
+   */
+  protected openFromSpace(event: Event): void {
+    event.preventDefault();
+    this.open();
+  }
+
+  protected setDragging(dragging: boolean): void {
+    this.dragging.set(dragging);
+  }
+
   /** Opens the move sheet, the touch equivalent of dragging. */
-  protected requestMove(): void {
+  protected requestMove(event: Event): void {
+    event.stopPropagation();
     this.moveRequested.emit(this.issue().id);
   }
 }

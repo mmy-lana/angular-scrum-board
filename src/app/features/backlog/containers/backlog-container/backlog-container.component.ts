@@ -54,8 +54,14 @@ const STATUS_ORDER: Readonly<Record<SprintStatus, number>> = {
     QuickCreateModalComponent,
     SprintGroupComponent,
   ],
+  host: {
+    // See the note on the board container: without this the host's default
+    // `min-height: auto` keeps the backlog taller than `main` and the view
+    // gets cropped rather than scrolling.
+    class: 'flex min-h-0 flex-1 flex-col overflow-hidden',
+  },
   template: `
-    <section class="flex h-full flex-col gap-4">
+    <section class="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
       <app-board-filter-bar
         [filter]="board.filter()"
         [users]="board.users()"

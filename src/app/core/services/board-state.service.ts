@@ -689,11 +689,16 @@ export class BoardStateService {
   }
 
   /**
-   * Removes a teammate and unassigns their issues in one transaction.
+   * Removes a teammate and re-points everything that referenced them.
    *
    * Leaving the assignments behind would strand cards on an id that resolves
    * to nobody, which the avatars already render as an empty placeholder. The
-   * last remaining user is refused: the board needs somebody to be acting as.
+   * reporter reference is not nullable, so a departed reporter would leave
+   * every issue they filed reading "Unknown user" in the detail view; those
+   * issues are handed to a surviving administrator instead. Both repairs happen
+   * in the same transaction as the delete, so no reader can observe an issue
+   * pointing at a user who is already gone. The last remaining user is refused:
+   * the board needs somebody to be acting as.
    */
   async deleteUser(userId: string): Promise<boolean> {
     if (this.users().length <= 1) {
@@ -705,13 +710,48 @@ export class BoardStateService {
 
     try {
       await db.transaction('rw', [db.users, db.issues], async () => {
+        const now = new Date().toISOString();
+
+        // Read the survivors through the transaction rather than the `users`
+        // signal. The signal is a live snapshot taken before the transaction
+        // opened, so it can name a teammate this transaction is deleting.
+        const survivors = await db.users.toArray();
+        const fallbackReporter =
+          survivors.find((user) => user.id !== userId && user.role === 'admin')?.id ??
+          survivors.find((user) => user.id !== userId)?.id ??
+          userId;
+
         const assigned = await db.issues.where('assigneeId').equals(userId).toArray();
+        const reported = await db.issues.where('reporterId').equals(userId).toArray();
+
+        // An issue can be both assigned to and reported by the same teammate.
+        // The two sets are merged into one patch per issue first: writing them
+        // separately would bump the version twice off the same stale read and
+        // drop one of the increments.
+        const versionById = new Map<string, number>();
+        const patchById = new Map<string, { assigneeId: string | null; reporterId: string }>();
 
         for (const issue of assigned) {
-          await db.issues.update(issue.id, {
-            assigneeId: null,
-            version: issue.version + 1,
-            updatedAt: new Date().toISOString(),
+          versionById.set(issue.id, issue.version);
+          patchById.set(issue.id, { assigneeId: null, reporterId: issue.reporterId });
+        }
+
+        for (const issue of reported) {
+          versionById.set(issue.id, issue.version);
+          const existing = patchById.get(issue.id);
+
+          if (existing === undefined) {
+            patchById.set(issue.id, { assigneeId: issue.assigneeId, reporterId: fallbackReporter });
+          } else {
+            existing.reporterId = fallbackReporter;
+          }
+        }
+
+        for (const [issueId, patch] of patchById) {
+          await db.issues.update(issueId, {
+            ...patch,
+            version: (versionById.get(issueId) ?? 0) + 1,
+            updatedAt: now,
           });
         }
 

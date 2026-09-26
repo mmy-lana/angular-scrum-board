@@ -56,9 +56,16 @@ const STACKED_BREAKPOINT = 1024;
     QuickCreateModalComponent,
     IssueDetailModalComponent,
   ],
+  host: {
+    // The host is a custom element, so it defaults to `display: block` with
+    // `min-height: auto`. As a flex item of `main` it would then refuse to
+    // shrink below its content and the board would be cropped by `main`
+    // instead of scrolling inside the lanes.
+    class: 'flex min-h-0 flex-1 flex-col overflow-hidden',
+  },
   template: `
-    <section class="flex h-full flex-col gap-4">
-      <header class="flex flex-wrap items-center justify-between gap-3">
+    <section class="flex h-full min-h-0 flex-col gap-4">
+      <header class="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <h1 class="truncate text-lg font-semibold text-slate-100">
             {{ board.project()?.name ?? 'Board' }}
@@ -159,7 +166,7 @@ const STACKED_BREAKPOINT = 1024;
 
         <div
           cdkDropListGroup
-          class="grid min-h-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+          class="grid min-h-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
         >
           @for (column of board.columnsSorted(); track column.id) {
             <div
@@ -272,9 +279,13 @@ export class BoardContainerComponent {
   private readonly viewportWidth = signal(readViewportWidth());
 
   /**
-   * Below {@link STACKED_BREAKPOINT} the lanes are fanned four-across, which
-   * leaves each one too narrow to read. The switcher then reveals a single
-   * lane at a time and the touch move sheet replaces dragging.
+   * From {@link STACKED_BREAKPOINT} upwards the lanes fan four-across. Below
+   * it each one is too narrow to read, so the switcher reveals a single lane at
+   * a time and the touch move sheet replaces dragging.
+   *
+   * The constant must stay equal to the `lg` breakpoint the lane grid switches
+   * on. While the two disagreed, a viewport between them got the fanned
+   * layout with a two-by-two grid, leaving two lanes below the fold.
    */
   protected readonly isStackedLayout = computed(
     () => this.viewportWidth() < STACKED_BREAKPOINT,
