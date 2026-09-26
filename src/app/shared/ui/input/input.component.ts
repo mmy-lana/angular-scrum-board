@@ -9,6 +9,9 @@ import {
 /** Native input behaviour. */
 export type InputType = 'text' | 'search' | 'number' | 'date' | 'email';
 
+/** Guaranteures a unique default `id` so several fields can share a screen. */
+let inputSequence = 0;
+
 /**
  * Labelled text field with first-class error and hint states.
  *
@@ -21,12 +24,12 @@ export type InputType = 'text' | 'search' | 'number' | 'date' | 'email';
   selector: 'app-input',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <label [for]="controlId" class="block text-xs font-medium text-slate-200">
+    <label [for]="controlId()" class="block text-xs font-medium text-slate-200">
       {{ label() }}
     </label>
 
     <input
-      [id]="controlId"
+      [id]="controlId()"
       [type]="type()"
       [value]="value()"
       [placeholder]="placeholder()"
@@ -45,11 +48,11 @@ export type InputType = 'text' | 'search' | 'number' | 'date' | 'email';
     />
 
     @if (hint() !== null && error() === null) {
-      <p [id]="hintId" class="mt-1 text-xs text-slate-400">{{ hint() }}</p>
+      <p [id]="hintId()" class="mt-1 text-xs text-slate-400">{{ hint() }}</p>
     }
 
     @if (error() !== null) {
-      <p [id]="errorId" role="alert" class="mt-1 text-xs text-rose-500">{{ error() }}</p>
+      <p [id]="errorId()" role="alert" class="mt-1 text-xs text-rose-500">{{ error() }}</p>
     }
   `,
 })
@@ -63,7 +66,7 @@ export class InputComponent {
   readonly disabled = input(false);
   readonly maxLength = input<number | null>(null);
   /** Overrides the generated id when the host needs a stable one. */
-  readonly controlId = input('app-input-control');
+  readonly controlId = input(`app-input-${inputSequence++}`);
   readonly required = input(false);
 
   readonly valueChange = output<string>();
