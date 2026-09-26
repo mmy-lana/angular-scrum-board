@@ -43,6 +43,25 @@ export interface CreateIssueRequest {
   readonly description?: string;
 }
 
+/** Everything required to add a teammate. */
+export interface CreateUserInput {
+  readonly name: string;
+  readonly email: string;
+  readonly role: User['role'];
+  /** Optional; omitted or blank renders initials instead of an image. */
+  readonly avatarUrl?: string;
+}
+
+/** A partial edit. Omitted fields are left untouched. */
+export type UpdateUserInput = Partial<Omit<User, 'id' | 'createdAt'>>;
+
+/**
+ * Deliberately permissive: enough to catch a typo without rejecting addresses
+ * that are perfectly valid but unusual. The only real test of an address is
+ * delivering to it.
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * The single reactive owner of board state.
  *
@@ -87,6 +106,16 @@ export class BoardStateService {
 
   /** User-facing message from the last failed mutation, if any. */
   readonly errorMessage = signal<string | null>(null);
+
+  /**
+   * Dismisses the current error.
+   *
+   * A stale failure is worse than none: the next successful write would leave
+   * it on screen, describing a problem the user has already moved past.
+   */
+  clearError(): void {
+    this.errorMessage.set(null);
+  }
 
   /** True while a mutation is in flight; used to disable destructive actions. */
   readonly isMutating = signal(false);
@@ -316,7 +345,7 @@ export class BoardStateService {
     this.isMutating.set(true);
 
     try {
-      await db.transaction('rw', db.issues, async () => {
+      await db.transaction('rw', [db.issues, db.activities], async () => {
         let neighbors = await this.resolveNeighborsInTx(
           request.targetColumnId,
           request.issueId,
@@ -343,15 +372,18 @@ export class BoardStateService {
           statusId: request.targetColumnId,
           sortOrder,
         });
-      });
 
-      if (changedColumn) {
-        await this.recordActivity(request.issueId, 'status_change', {
-          field: 'statusId',
-          from: fromColumnTitle,
-          to: toColumnTitle,
-        });
-      }
+        // The history row shares the move's transaction. Writing it afterwards
+        // would let a failure land between the two commits, producing a card
+        // that moved with nothing in its timeline to explain why.
+        if (changedColumn) {
+          await this.addActivity(request.issueId, 'status_change', {
+            field: 'statusId',
+            from: fromColumnTitle,
+            to: toColumnTitle,
+          });
+        }
+      });
 
       return true;
     } catch (error) {
@@ -531,6 +563,170 @@ export class BoardStateService {
     }
   }
 
+  // --- team administration ------------------------------------------------
+  //
+  // `users` is derived from a `liveQuery`, so every write here propagates to
+  // each assignee picker and to the activity avatar without any extra wiring.
+
+  /**
+   * Adds a teammate.
+   *
+   * @returns the new id, or `null` when validation or the write failed. The
+   * reason is left on {@link errorMessage} for the caller to surface.
+   */
+  async createUser(input: CreateUserInput): Promise<string | null> {
+    const name = input.name.trim();
+    const email = input.email.trim();
+
+    if (name.length === 0 || email.length === 0) {
+      this.errorMessage.set('A teammate needs both a name and an email address.');
+      return null;
+    }
+
+    if (!EMAIL_PATTERN.test(email)) {
+      this.errorMessage.set(`"${email}" is not a valid email address.`);
+      return null;
+    }
+
+    if (this.users().some((user) => user.email.toLowerCase() === email.toLowerCase())) {
+      this.errorMessage.set(`${name} already has an account on this board.`);
+      return null;
+    }
+
+    const user: User = {
+      id: `user-${crypto.randomUUID()}`,
+      name,
+      email,
+      role: input.role,
+      avatarUrl: input.avatarUrl?.trim() ?? '',
+      createdAt: new Date().toISOString(),
+    };
+
+    this.isMutating.set(true);
+
+    try {
+      await db.users.add(user);
+      return user.id;
+    } catch (error) {
+      this.reportMutationFailure(error, 'add the teammate');
+      return null;
+    } finally {
+      this.isMutating.set(false);
+    }
+  }
+
+  /**
+   * Applies a partial edit to a teammate.
+   *
+   * Blank or malformed values are rejected before any field is touched, so a
+   * rejected edit cannot leave a teammate with, say, a new name and the old
+   * email.
+   */
+  async updateUser(userId: string, changes: UpdateUserInput): Promise<boolean> {
+    const current = this.usersById().get(userId);
+
+    if (current === undefined) {
+      this.errorMessage.set('That teammate no longer exists.');
+      return false;
+    }
+
+    const patch: Partial<Omit<User, 'id' | 'createdAt'>> = {};
+
+    if (changes.name !== undefined) {
+      const name = changes.name.trim();
+
+      if (name.length === 0) {
+        this.errorMessage.set('A teammate cannot be renamed to an empty name.');
+        return false;
+      }
+
+      patch.name = name;
+    }
+
+    if (changes.email !== undefined) {
+      const email = changes.email.trim();
+
+      if (!EMAIL_PATTERN.test(email)) {
+        this.errorMessage.set(`"${email}" is not a valid email address.`);
+        return false;
+      }
+
+      const duplicate = this.users().some(
+        (user) => user.id !== userId && user.email.toLowerCase() === email.toLowerCase(),
+      );
+
+      if (duplicate) {
+        this.errorMessage.set('Another teammate already uses that email address.');
+        return false;
+      }
+
+      patch.email = email;
+    }
+
+    if (changes.role !== undefined) {
+      patch.role = changes.role;
+    }
+
+    if (changes.avatarUrl !== undefined) {
+      patch.avatarUrl = changes.avatarUrl.trim();
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return true;
+    }
+
+    this.isMutating.set(true);
+
+    try {
+      await db.users.update(userId, patch);
+      return true;
+    } catch (error) {
+      this.reportMutationFailure(error, 'update the teammate');
+      return false;
+    } finally {
+      this.isMutating.set(false);
+    }
+  }
+
+  /**
+   * Removes a teammate and unassigns their issues in one transaction.
+   *
+   * Leaving the assignments behind would strand cards on an id that resolves
+   * to nobody, which the avatars already render as an empty placeholder. The
+   * last remaining user is refused: the board needs somebody to be acting as.
+   */
+  async deleteUser(userId: string): Promise<boolean> {
+    if (this.users().length <= 1) {
+      this.errorMessage.set('The last remaining teammate cannot be removed.');
+      return false;
+    }
+
+    this.isMutating.set(true);
+
+    try {
+      await db.transaction('rw', [db.users, db.issues], async () => {
+        const assigned = await db.issues.where('assigneeId').equals(userId).toArray();
+
+        for (const issue of assigned) {
+          await db.issues.update(issue.id, {
+            assigneeId: null,
+            version: issue.version + 1,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        await db.users.delete(userId);
+      });
+
+      return true;
+    } catch (error) {
+      this.reportMutationFailure(error, 'remove the teammate');
+      return false;
+    } finally {
+      this.isMutating.set(false);
+    }
+  }
+
   async addComment(issueId: string, content: string): Promise<boolean> {
     const trimmed = content.trim();
 
@@ -614,15 +810,12 @@ export class BoardStateService {
     );
   }
 
-  private async recordActivity(
-    issueId: string,
-    action: IssueActivityAction,
-    details: IssueActivityDetails,
-  ): Promise<void> {
-    await this.addActivity(issueId, action, details);
-  }
-
-  /** Writes one activity row. Callers supply the surrounding transaction. */
+  /**
+   * Writes one activity row.
+   *
+   * The caller supplies the surrounding transaction, so the history entry
+   * commits or rolls back together with the change it describes.
+   */
   private async addActivity(
     issueId: string,
     action: IssueActivityAction,
@@ -651,8 +844,15 @@ export class BoardStateService {
     const prefix = this.project()?.key ?? 'SCRUM';
 
     const highest = this.issues().reduce((max, issue) => {
-      const suffix = Number.parseInt(issue.key.slice(prefix.length + 1), 10);
-      return Number.isNaN(suffix) ? max : Math.max(max, suffix);
+      // Slicing on the prefix assumed every key was `${prefix}-${n}`. An
+      // imported checkpoint or a key from a different project would then be
+      // parsed as a fragment, and `Number.parseInt` would quietly treat the
+      // first digit it found as authoritative — or yield NaN. Taking the
+      // trailing run of digits is independent of how the prefix is spelled.
+      const match = /(\d+)$/.exec(issue.key);
+      const parsed = match?.[1] === undefined ? Number.NaN : Number.parseInt(match[1], 10);
+
+      return Number.isNaN(parsed) ? max : Math.max(max, parsed);
     }, 0);
 
     return `${prefix}-${highest + 1}`;

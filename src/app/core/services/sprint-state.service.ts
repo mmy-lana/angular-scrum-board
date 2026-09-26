@@ -210,17 +210,22 @@ export class SprintStateService {
         const completed = sprintIssues.filter((issue) => issue.statusId === doneColumnId);
 
         // Release everything that is not in the terminal lane back to backlog.
-        await Promise.all(
-          sprintIssues
-            .filter((issue) => issue.statusId !== doneColumnId)
-            .map((issue) =>
-              db.issues.update(issue.id, {
-                sprintId: null,
-                version: issue.version + 1,
-                updatedAt: now,
-              }),
-            ),
-        );
+        //
+        // These updates run one at a time. A native `Promise.all` hands Dexie a
+        // set of promises it did not create and does not track, so the
+        // transaction can consider itself finished while the last writes are
+        // still in flight — which surfaces as a `PrematureCommitError` partway
+        // through completing a sprint, leaving the sprint marked done with
+        // some of its issues still attached.
+        const incompleteIssues = sprintIssues.filter((issue) => issue.statusId !== doneColumnId);
+
+        for (const issue of incompleteIssues) {
+          await db.issues.update(issue.id, {
+            sprintId: null,
+            version: issue.version + 1,
+            updatedAt: now,
+          });
+        }
 
         await db.sprints.update(sprintId, {
           status: 'completed',

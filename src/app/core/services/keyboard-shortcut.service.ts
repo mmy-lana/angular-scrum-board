@@ -60,7 +60,22 @@ export class KeyboardShortcutService {
       return;
     }
 
+    // A single-key command is far too easy to trigger by accident from inside
+    // a dialog, where the surrounding board is still in the DOM but should not
+    // be receiving commands. Escape stays above this guard because it is the
+    // one shortcut whose whole job is to dismiss the open overlay.
+    if (this.hasOpenDialog()) {
+      return;
+    }
+
     if (isTypingTarget(event.target)) {
+      return;
+    }
+
+    // `event.target` is the element the key was pressed on, which is not
+    // necessarily the one holding focus. A shortcut pressed while a button or
+    // select is focused would otherwise act on the board behind it.
+    if (this.isInteractiveElementFocused()) {
       return;
     }
 
@@ -70,6 +85,26 @@ export class KeyboardShortcutService {
       event.preventDefault();
       this.events.next({ action });
     }
+  }
+
+  /** True while any rendered dialog is open. */
+  private hasOpenDialog(): boolean {
+    return this.document.querySelector('[role="dialog"]') !== null;
+  }
+
+  private isInteractiveElementFocused(): boolean {
+    const active = this.document.activeElement;
+
+    if (active === null || !(active instanceof HTMLElement) || active === this.document.body) {
+      return false;
+    }
+
+    return (
+      active.isContentEditable ||
+      ['input', 'textarea', 'select', 'button', 'a', 'option'].includes(
+        active.tagName.toLowerCase(),
+      )
+    );
   }
 }
 

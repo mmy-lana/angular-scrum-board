@@ -9,7 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { fromEvent } from 'rxjs';
+import { auditTime, fromEvent } from 'rxjs';
 
 import { Issue, IssuePriority } from '../../../../core/models/issue.model';
 import { BoardStateService } from '../../../../core/services/board-state.service';
@@ -299,8 +299,14 @@ export class BoardContainerComponent {
       .pipe(takeUntilDestroyed())
       .subscribe((shortcut) => this.handleShortcut(shortcut.action));
 
+    // Resize fires continuously while a window is dragged, and every event
+    // re-derives the whole column/tab layout. Sampling at 100ms keeps the
+    // breakpoint honest while collapsing a drag into a handful of updates.
     fromEvent(window, 'resize')
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        auditTime(100),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => this.viewportWidth.set(readViewportWidth()));
   }
 

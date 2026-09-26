@@ -25,7 +25,7 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [AvatarComponent, PriorityIconComponent, TypeIconComponent, CdkDragHandle],
   template: `
-    <article [class]="containerClasses()" (click)="opened.emit(issue().id)">
+    <article [class]="containerClasses()">
       <div class="flex items-start gap-2">
         <div class="flex min-w-0 flex-1 items-center gap-1.5">
           <span class="font-mono text-xs text-slate-400">{{ issue().key }}</span>
@@ -41,7 +41,7 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
                 hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-2
                 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
               [attr.aria-label]="'Move ' + issue().key + ' without dragging'"
-              (click)="handleMoveClick($event)"
+              (click)="requestMove()"
             >
               <svg
                 class="h-4 w-4"
@@ -61,8 +61,8 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
 
           <span
             cdkDragHandle
-            class="flex min-h-11 min-w-11 cursor-grab items-center justify-center rounded-lg
-              text-slate-400 hover:bg-slate-700 hover:text-slate-100 active:cursor-grabbing
+            class="flex min-h-11 min-w-11 cursor-grab touch-none items-center justify-center
+              rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-100 active:cursor-grabbing
               focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
             [attr.aria-label]="'Drag ' + issue().key + ' to reorder'"
           >
@@ -82,7 +82,7 @@ import { AvatarComponent } from '../../../../shared/ui/avatar/avatar.component';
         type="button"
         [class]="titleClasses()"
         [attr.aria-label]="accessibleLabel()"
-        (click)="handleTitleClick($event)"
+        (click)="open()"
       >
         {{ issue().title }}
       </button>
@@ -126,7 +126,7 @@ export class IssueCardComponent {
 
   protected readonly containerClasses = computed<string>(() => {
     const base =
-      'flex w-full cursor-pointer flex-col rounded-lg border border-slate-700 bg-slate-800 ' +
+      'flex w-full flex-col rounded-lg border border-slate-700 bg-slate-800 ' +
       'text-left shadow-sm transition-colors hover:border-slate-600 ' +
       'focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-indigo-500';
 
@@ -156,14 +156,13 @@ export class IssueCardComponent {
     return `${issue.key}: ${issue.title}${points}`;
   });
 
-  protected handleTitleClick(event: MouseEvent): void {
-    // The container also opens on click; stop it firing twice.
-    event.stopPropagation();
+  /** Opens the detail view. Bound to the title, the card's primary action. */
+  protected open(): void {
     this.opened.emit(this.issue().id);
   }
 
-  protected handleMoveClick(event: MouseEvent): void {
-    event.stopPropagation();
+  /** Opens the move sheet, the touch equivalent of dragging. */
+  protected requestMove(): void {
     this.moveRequested.emit(this.issue().id);
   }
 }

@@ -146,6 +146,146 @@ export class ScrumDatabase extends Dexie {
       },
     );
   }
+
+  /**
+   * Serialises the whole database to a portable JSON checkpoint.
+   *
+   * Browser storage is evictable, so this gives the user a copy they own
+   * outside the origin. Every table is read, and the payload is stamped with a
+   * schema version and an export timestamp so a later restore can refuse
+   * anything it does not understand instead of writing half-understood rows.
+   */
+  async exportCheckpoint(): Promise<string> {
+    const [projects, issues, sprints, users, comments, activities, columns] = await Promise.all([
+      this.projects.toArray(),
+      this.issues.toArray(),
+      this.sprints.toArray(),
+      this.users.toArray(),
+      this.comments.toArray(),
+      this.activities.toArray(),
+      this.columns.toArray(),
+    ]);
+
+    const checkpoint: CheckpointPayload = {
+      version: CHECKPOINT_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: { projects, issues, sprints, users, comments, activities, columns },
+    };
+
+    return JSON.stringify(checkpoint, null, 2);
+  }
+
+  /**
+   * Replaces the entire database from a checkpoint produced by
+   * {@link exportCheckpoint}.
+   *
+   * The schema version is checked before anything is written, and the restore
+   * then runs through {@link replaceAllData} so either every table lands or the
+   * database is left exactly as it was. A partially applied restore would be
+   * worse than none, because the live queries would happily render the
+   * wreckage.
+   *
+   * @returns `{ success: true }` once committed, otherwise a message suitable
+   * for display. The original state is preserved on every failure path.
+   */
+  async importCheckpoint(json: string): Promise<ImportResult> {
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      return { success: false, error: 'That file is not valid JSON.' };
+    }
+
+    const validation = validateCheckpoint(parsed);
+
+    if (validation === null) {
+      return {
+        success: false,
+        error: `Unsupported checkpoint: expected version ${CHECKPOINT_VERSION} with a data object.`,
+      };
+    }
+
+    try {
+      await this.replaceAllData(validation);
+
+      return { success: true };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'The checkpoint could not be restored.',
+      };
+    }
+  }
+}
+
+/** Bumped whenever a table shape changes in a way old files cannot satisfy. */
+const CHECKPOINT_VERSION = 1;
+
+/** The full set of tables captured by a checkpoint. */
+type CheckpointTables = {
+  projects: Project[];
+  issues: Issue[];
+  sprints: Sprint[];
+  users: User[];
+  comments: IssueComment[];
+  activities: IssueActivity[];
+  columns: BoardColumn[];
+};
+
+/** The on-disk shape written by {@link ScrumDatabase.exportCheckpoint}. */
+type CheckpointPayload = {
+  version: number;
+  exportedAt: string;
+  data: CheckpointTables;
+};
+
+/** Outcome of a restore attempt; `error` is present exactly when `success` is false. */
+export type ImportResult = { success: true } | { success: false; error: string };
+
+/**
+ * Narrows untrusted JSON to a checkpoint payload.
+ *
+ * Only the envelope and the table arrays are checked. Record-level validation
+ * is the application's job elsewhere, and re-deriving it here would duplicate
+ * the domain rules; what matters at this boundary is that each table really is
+ * an array, so a hand-edited file cannot smuggle a scalar into `bulkAdd`.
+ */
+function validateCheckpoint(value: unknown): CheckpointTables | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const candidate = value as Partial<CheckpointPayload>;
+  const data = candidate.data as Partial<CheckpointTables> | undefined;
+
+  if (candidate.version !== CHECKPOINT_VERSION || typeof data !== 'object' || data === null) {
+    return null;
+  }
+
+  const tables: (keyof CheckpointTables)[] = [
+    'projects',
+    'issues',
+    'sprints',
+    'users',
+    'comments',
+    'activities',
+    'columns',
+  ];
+
+  if (!tables.every((table) => Array.isArray(data[table]))) {
+    return null;
+  }
+
+  return {
+    projects: data.projects as Project[],
+    issues: data.issues as Issue[],
+    sprints: data.sprints as Sprint[],
+    users: data.users as User[],
+    comments: data.comments as IssueComment[],
+    activities: data.activities as IssueActivity[],
+    columns: data.columns as BoardColumn[],
+  };
 }
 
 /**

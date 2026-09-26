@@ -160,6 +160,20 @@ interface IssueDetailView extends Issue {
 
         <ng-container modalFooter>
           <app-button
+            label="Share via WhatsApp"
+            variant="secondary"
+            size="sm"
+            (click)="shareToWhatsApp()"
+          />
+
+          <app-button
+            [label]="copyLabel()"
+            variant="secondary"
+            size="sm"
+            (click)="copySummary()"
+          />
+
+          <app-button
             label="Delete issue"
             variant="danger"
             size="sm"
@@ -276,6 +290,88 @@ export class IssueDetailModalComponent {
     void this.board.updateIssue(this.issueId(), { storyPoints: parsed });
   }
 
+  /**
+   * Renders the issue as Markdown for pasting into a ticket, a chat or a PR.
+   *
+   * The status is resolved to its column title here rather than exported as an
+   * id, because the recipient has no way to look up what `col-in-progress-2`
+   * means.
+   */
+  protected getFormattedSummary(): string {
+    const current = this.view();
+
+    if (current === null) {
+      return '';
+    }
+
+    const facts = [
+      `**Status:** ${current.statusLabel}`,
+      `**Priority:** ${current.priority}`,
+      `**Type:** ${current.type}`,
+      `**Assignee:** ${current.assignee?.name ?? 'Unassigned'}`,
+      `**Points:** ${current.storyPoints ?? 'Unestimated'}`,
+    ];
+
+    const description =
+      current.description.trim().length > 0
+        ? current.description.trim()
+        : '_No description provided._';
+
+    return [`### [${current.key}] ${current.title}`, '', ...facts, '', description].join('\n');
+  }
+
+  protected readonly copyState = signal<'idle' | 'copied' | 'failed'>('idle');
+
+  protected readonly copyLabel = computed<string>(() => {
+    switch (this.copyState()) {
+      case 'copied':
+        return 'Copied';
+      case 'failed':
+        return 'Copy failed';
+      default:
+        return 'Copy summary';
+    }
+  });
+
+  /**
+   * Copies the Markdown summary, reporting the outcome rather than assuming it.
+   *
+   * The async clipboard API is unavailable outside a secure context and can be
+   * refused by permission policy, so the legacy `execCommand` path stays as a
+   * fallback. Either way the user gets a visible result.
+   */
+  protected async copySummary(): Promise<void> {
+    const text = this.getFormattedSummary();
+
+    if (text.length === 0) {
+      return;
+    }
+
+    const written = await writeToClipboard(text);
+
+    this.copyState.set(written ? 'copied' : 'failed');
+
+    // Returns the label to its resting state so the button is not stuck
+    // advertising a copy that has since scrolled out of relevance.
+    setTimeout(() => this.copyState.set('idle'), 2500);
+  }
+
+  /**
+   * Opens WhatsApp with the summary pre-filled.
+   *
+   * `wa.me` is used rather than a raw `https://api.whatsapp.com/send` so the
+   * recipient number can be chosen in the same flow.
+   */
+  protected shareToWhatsApp(): void {
+    const text = this.getFormattedSummary();
+
+    if (text.length === 0) {
+      return;
+    }
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  }
+
   protected requestDelete(): void {
     this.confirmingDelete.set(true);
   }
@@ -307,4 +403,39 @@ function readValue(event: Event): string {
   }
 
   return '';
+}
+
+/**
+ * Puts text on the system clipboard, reporting whether it actually landed.
+ *
+ * `navigator.clipboard` needs a secure context and a granted permission, so a
+ * hidden textarea plus `execCommand` remains the fallback. Both paths return a
+ * boolean instead of rejecting, because a refusal here is a UI state to show,
+ * not an error to propagate.
+ */
+async function writeToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText !== undefined) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the legacy path rather than surfacing the failure yet.
+    }
+  }
+
+  try {
+    const staging = document.createElement('textarea');
+    staging.value = text;
+    staging.setAttribute('readonly', '');
+    staging.className = 'fixed -top-0 -left-0 h-px w-px opacity-0';
+    document.body.appendChild(staging);
+    staging.select();
+
+    const copied = document.execCommand('copy');
+    staging.remove();
+
+    return copied;
+  } catch {
+    return false;
+  }
 }
