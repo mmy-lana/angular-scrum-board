@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  input,
+  output,
+  viewChild,
+} from '@angular/core';
 
 import { BoardFilterState, countActiveFilters } from '../../../../core/models/filter.model';
 import {
@@ -32,6 +40,7 @@ import { ButtonComponent } from '../../../../shared/ui/button/button.component';
       <div class="min-w-0 flex-1 lg:min-w-56">
         <label for="board-search" class="sr-only">Search issues</label>
         <input
+          #searchField
           id="board-search"
           type="search"
           placeholder="Search issues…"
@@ -145,6 +154,13 @@ export class BoardFilterBarComponent {
   readonly sprintChanged = output<string | null>();
   readonly densityChanged = output<'compact' | 'comfortable'>();
   readonly clearRequested = output<void>();
+
+  private readonly searchField = viewChild<ElementRef<HTMLInputElement>>('searchField');
+
+  /** Moves focus to the search field; bound to the `/` shortcut. */
+  focusSearch(): void {
+    this.searchField()?.nativeElement.focus();
+  }
 
   protected readonly ISSUE_PRIORITIES = ISSUE_PRIORITIES;
   protected readonly ISSUE_TYPES = ISSUE_TYPES;
