@@ -1,0 +1,15 @@
+# pnpm 11 reads project settings from this file (the `pnpm` field in
+# package.json is no longer honoured).
+
+# `storeDir` is pinned so that dependency installs keep linking against the
+# shared pnpm store. Without it, pnpm defaults to a project-local `.pnpm-store`
+# and refuses to relink an existing node_modules tree.
+storeDir: /Users/hikari/Library/pnpm/store
+
+# Native packages that legitimately need a postinstall step. pnpm blocks build
+# scripts by default and treats an unapproved one as a fatal install error.
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
