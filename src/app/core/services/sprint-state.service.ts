@@ -62,8 +62,16 @@ export class SprintStateService {
    * the figures can never drift from the work they describe.
    */
   progressFor(sprintId: string): SprintProgress {
+    return this.progressForIssues(this.board.issues().filter((i) => i.sprintId === sprintId));
+  }
+
+  /**
+   * Rollups for an arbitrary set of issues, using the same terminal-lane rule
+   * as {@link progressFor}. Lets the backlog score its unscheduled group
+   * without re-deriving which column counts as done.
+   */
+  progressForIssues(issues: readonly Issue[]): SprintProgress {
     const doneColumnId = this.doneColumnId();
-    const issues = this.board.issues().filter((issue) => issue.sprintId === sprintId);
     const completed = issues.filter((issue) => issue.statusId === doneColumnId);
 
     const totalPoints = sumPoints(issues);

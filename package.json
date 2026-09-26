@@ -19,8 +19,7 @@
     "@angular/platform-browser": "latest",
     "@angular/router": "latest",
     "dexie": "latest",
-    "rxjs": "latest",
-    "zone.js": "latest"
+    "rxjs": "latest"
   },
   "devDependencies": {
     "@analogjs/vite-plugin-angular": "latest",

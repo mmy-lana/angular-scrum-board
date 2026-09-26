@@ -99,6 +99,13 @@ export class ScrumDatabase extends Dexie {
   /**
    * Writes a complete set of seed records atomically, replacing any previous
    * contents. Returns once every table has been committed.
+   *
+   * The table operations run one after another rather than through
+   * `Promise.all`. Dexie tracks the operations belonging to a transaction, and
+   * combining them in a native `Promise.all` can let the transaction commit
+   * before the last write is registered — surfacing as a
+   * `PrematureCommitError` on a first run. Sequential awaits are also the
+   * pattern Dexie documents for transaction bodies.
    */
   async replaceAllData(payload: {
     projects: readonly Project[];
@@ -111,30 +118,48 @@ export class ScrumDatabase extends Dexie {
   }): Promise<void> {
     await this.transaction(
       'rw',
-      [this.projects, this.issues, this.sprints, this.users, this.comments, this.activities, this.columns],
+      [
+        this.projects,
+        this.issues,
+        this.sprints,
+        this.users,
+        this.comments,
+        this.activities,
+        this.columns,
+      ],
       async () => {
-        await Promise.all([
-          this.projects.clear(),
-          this.issues.clear(),
-          this.sprints.clear(),
-          this.users.clear(),
-          this.comments.clear(),
-          this.activities.clear(),
-          this.columns.clear(),
-        ]);
+        await this.projects.clear();
+        await this.issues.clear();
+        await this.sprints.clear();
+        await this.users.clear();
+        await this.comments.clear();
+        await this.activities.clear();
+        await this.columns.clear();
 
-        await Promise.all([
-          this.projects.bulkAdd(payload.projects),
-          this.issues.bulkAdd(payload.issues),
-          this.sprints.bulkAdd(payload.sprints),
-          this.users.bulkAdd(payload.users),
-          this.comments.bulkAdd(payload.comments),
-          this.activities.bulkAdd(payload.activities),
-          this.columns.bulkAdd(payload.columns),
-        ]);
+        await writeRows(this.projects, payload.projects);
+        await writeRows(this.issues, payload.issues);
+        await writeRows(this.sprints, payload.sprints);
+        await writeRows(this.users, payload.users);
+        await writeRows(this.comments, payload.comments);
+        await writeRows(this.activities, payload.activities);
+        await writeRows(this.columns, payload.columns);
       },
     );
   }
+}
+
+/**
+ * Adds rows to a table, skipping the call when there is nothing to write.
+ *
+ * `bulkAdd([])` registers no work, so calling it inside a transaction leaves a
+ * point at which Dexie can consider the transaction finished early.
+ */
+async function writeRows<T>(table: Table<T>, rows: readonly T[]): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  await table.bulkAdd(rows);
 }
 
 /** The single application-wide database connection. */

@@ -58,6 +58,27 @@ const STACKED_BREAKPOINT = 1024;
   ],
   template: `
     <section class="flex h-full flex-col gap-4">
+      <header class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="truncate text-lg font-semibold text-slate-100">
+            {{ board.project()?.name ?? 'Board' }}
+          </h1>
+          @if (board.project()?.description; as description) {
+            <p class="truncate text-sm text-slate-400">{{ description }}</p>
+          }
+        </div>
+
+        <button
+          type="button"
+          class="min-h-11 shrink-0 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white
+            hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2
+            focus-visible:outline-indigo-500"
+          (click)="openQuickCreate()"
+        >
+          New issue
+        </button>
+      </header>
+
       <app-board-filter-bar
         #filterBar
         [filter]="board.filter()"
@@ -143,8 +164,8 @@ const STACKED_BREAKPOINT = 1024;
           @for (column of board.columnsSorted(); track column.id) {
             <div
               [id]="panelId(column.id)"
-              role="tabpanel"
-              [attr.aria-labelledby]="tabId(column.id)"
+              [attr.role]="isStackedLayout() ? 'tabpanel' : null"
+              [attr.aria-labelledby]="isStackedLayout() ? tabId(column.id) : null"
               [class.hidden]="isStackedLayout() && column.id !== selectedColumnId()"
               class="min-h-0"
             >
@@ -223,7 +244,26 @@ export class BoardContainerComponent {
   protected readonly quickCreateColumnId = signal<string | null>(null);
   protected readonly openIssueId = signal<string | null>(null);
   protected readonly moveSheetIssueId = signal<string | null>(null);
-  protected readonly selectedColumnId = signal<string>('');
+
+  /**
+   * The column the user picked, or `null` before they have picked one.
+   *
+   * Held separately from the effective selection below because the columns
+   * arrive asynchronously: seeding this from the constructor captured an empty
+   * list, left the selection as an id matching no column, and hid every lane.
+   */
+  private readonly requestedColumnId = signal<string | null>(null);
+
+  /** Falls back to the first lane until the user makes a choice. */
+  protected readonly selectedColumnId = computed<string>(() => {
+    const requested = this.requestedColumnId();
+
+    if (requested !== null && this.board.columnById(requested) !== null) {
+      return requested;
+    }
+
+    return this.board.columnsSorted()[0]?.id ?? '';
+  });
 
   /** Priority and type pre-seeded into the quick-create dialog by a shortcut. */
   protected readonly seededPriority = signal<IssuePriority | null>(null);
@@ -255,8 +295,6 @@ export class BoardContainerComponent {
   });
 
   constructor() {
-    this.selectedColumnId.set(this.board.columnsSorted()[0]?.id ?? '');
-
     this.shortcuts.shortcuts$
       .pipe(takeUntilDestroyed())
       .subscribe((shortcut) => this.handleShortcut(shortcut.action));
@@ -320,7 +358,7 @@ export class BoardContainerComponent {
   }
 
   protected selectColumn(columnId: string): void {
-    this.selectedColumnId.set(columnId);
+    this.requestedColumnId.set(columnId);
   }
 
   protected openIssue(issueId: string): void {
