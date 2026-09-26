@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.angular/
+.vite/
+*.local
+.env
+.env.*.local
+.DS_Store
+repomix-output.xml
